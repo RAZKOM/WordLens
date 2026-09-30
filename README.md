@@ -1,9 +1,9 @@
 # WordLens
 
 Endless 5-letter word guessing for Even Realities G2 glasses, built as an Even Hub plugin.
-Six guesses per word, a streak and guess distribution that survive restarts, and the next word is dealt the moment a round ends.
+Six guesses per word, a streak and guess distribution that survive a full app restart, and the next word is dealt the moment a round ends.
 
-![Scored guess in the simulator](docs/screenshots/02-scored-guess.png)
+![Win in three guesses](docs/screenshots/02-win.png)
 
 ## Quick start
 
@@ -36,17 +36,19 @@ For quick testing without editing code, URL parameters override the defaults:
 
 | Gesture | Vertical picker | Horizontal picker | Help / Stats |
 | --- | --- | --- | --- |
-| Swipe up/down | Move through the list | Move left/right along the strip (wraps) | – |
+| Swipe up/down | Move through the list (edges do not wrap) | Move left/right along the carousel (wraps) | – |
 | Tap | Type the highlighted item | Type the centred item | Back to Play |
 | Hold | Delete one letter | Delete one letter | – |
 | Double-tap | Exit prompt | Exit prompt | Exit prompt |
 | Tap, then hold | Menu: Enter guess, Backspace, Help, Stats, Give up, Quit | Same | Back to game, Quit |
 
 Items: `DEL` backspaces, `ENTER` submits. In the vertical picker, page A holds `DEL`, `ENTER`, 17 letters and
-`MORE >>` (the 20-item limit); page B holds the other 9 letters and `<< BACK`.
-Double letters (APPLE) need two separate taps: two quick taps are a double-tap.
+`MORE >>` (the 20-item limit); page B holds the other 9 letters and `<< BACK`. Scrolling past either
+edge does not change pages.
+Double letters (APPLE) need two separate taps. A fast double-tap is a double-tap, not two single taps.
 
 Marks use shape, not brightness alone: solid fill = right spot, circle = wrong spot, strike = not in word.
+Dim marks (absent letters, empty cells) stay visible.
 
 **Stats** shows streak, best, played, wins and win rate, plus a bar chart of guesses per game
 (1–6, and L for losses and give-ups). Wins are solid bars, L is an outline, and your latest game's bar is full brightness.
@@ -89,17 +91,8 @@ Grey levels per mark are in `src/render/cells.ts` (`LEVELS`).
 Both pickers, both board sides, typing, submit and scoring, the `MORE >>` page swap, the contextual
 menu (Enter, Give up, Stats, Help), the Stats page and chart, double-tap exit, persistence across a
 WebView reload, and recovery when `createStartUpPageContainer` fails on reload.
-Screenshots are in `docs/screenshots/` (`07-chart-sample-data.png` is a renderer preview with sample numbers).
+Screenshots are in `docs/screenshots/`.
 
 Observed on the wire: list taps arrive as `listEvent` with only `currentSelectItemIndex`; swipes on a
 native list emit no events; swipes on a text container emit `SCROLL_BOTTOM` (down) / `SCROLL_TOP` (up)
 as `textEvent`; taps on a text container arrive as `sysEvent`; double-tap arrives as `sysEvent` type 3.
-
-## Still to check on real glasses
-
-1. Stats survive a full app restart (the simulator wipes storage when it quits).
-2. Dim marks (absent letters, empty cells) stay visible; adjust `LEVELS` if not.
-3. Horizontal picker: every swipe on the blank text container reaches the app, and the carousel
-   redraw (~100 ms per swipe) feels responsive enough.
-4. Vertical picker: whether list edges emit scroll events. If they do, set `EDGE_SCROLL_SWAPS_PAGES = true`.
-5. Whether a fast double-tap also sends a single tap first.

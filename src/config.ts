@@ -90,8 +90,8 @@ export const MENU = {
 
 /**
  * Vertical picker only: swap list pages when the firmware reports scrolling
- * past a list edge. In the simulator, native lists emit no scroll events, so
- * this stays off until checked on hardware.
+ * past a list edge. On hardware the list edges do not emit those events, so
+ * this stays off. Pages change with MORE >> and << BACK.
  */
 export const EDGE_SCROLL_SWAPS_PAGES = false
 
