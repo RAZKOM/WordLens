@@ -1,0 +1,30 @@
+{
+  "name": "wordlens",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "wordlists": "tsx scripts/build-wordlists.ts",
+    "preview-frames": "tsx scripts/preview-frames.ts",
+    "pack": "npm run build && evenhub pack app.json dist -o wordlens.ehpk",
+    "qr": "evenhub qr --port 5173",
+    "simulate": "evenhub-simulator http://localhost:5173"
+  },
+  "dependencies": {
+    "@evenrealities/even_hub_sdk": "^0.0.16"
+  },
+  "devDependencies": {
+    "@evenrealities/evenhub-cli": "^0.1.14",
+    "@evenrealities/evenhub-simulator": "^0.9.5",
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2",
+    "wordlist-english": "^1.2.1"
+  }
+}
