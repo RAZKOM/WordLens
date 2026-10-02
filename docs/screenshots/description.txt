@@ -1,8 +1,8 @@
 WordLens is an endless five-letter word game for your glasses. Each round gives you six guesses. The moment a round ends, the next word is dealt, as many times as you want to keep playing.
 
-Play from the touch bar. Swipe to move along the letters, and tap to type the one in the centre. Hold to delete the last letter. Tap, then hold, to open the menu. Enter guess and Backspace sit at the top, so submitting or deleting is one tap away. Help, Stats, Give up, and Quit are in that same menu. Double-tap asks you to leave, and the glasses confirm before the game closes.
+Play from the touch bar on a full keyboard. Swipe to walk the keys, and brackets follow you instantly. Tap to type a letter, or tap ENTER to guess. Hold to delete the last letter. Tap, then hold, to open the menu. Enter guess and Backspace sit at the top, so submitting or deleting is one tap away. Help, Stats, Give up, and Quit are in that same menu. Double-tap asks you to leave, and the glasses confirm before the game closes.
 
-Marks use shape, so they stay clear on the display. A solid tile means the letter is in the word and in the right place. A circle means the letter is in the word, in the wrong place. A strike means the letter is not in the word. The same marks appear on the keyboard beside your current streak and your best streak.
+Marks use shape, so they stay clear on the display. A solid tile means the letter is in the word and in the right place. A circle means the letter is in the word, in the wrong place. A strike means the letter is not in the word. The same marks appear on the keyboard, so you can see which letters are left while you type. Your current streak and your best streak sit above it.
 
 A guess has to be five letters and in the word list. If it is short, the glasses tell you that you need five letters. If it is not a word, they say it is not in the list. Those notes stay up long enough to read. Win, and you see how many guesses it took. Miss all six, or give up, and the answer is shown before the next word begins.
 

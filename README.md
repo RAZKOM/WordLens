@@ -14,6 +14,8 @@ npm run dev            # Vite on :5173
 npm run simulate       # in a second terminal: evenhub-simulator against :5173
 npm run qr             # QR code to sideload the dev server onto your phone
 npm run pack           # production build → wordlens.ehpk
+npx tsx scripts/listing-sim.ts    # store play screenshots from the simulator (keyboard text)
+npx tsx scripts/listing-shots.ts  # store Help and Stats screenshots
 ```
 
 Requires Even App ≥ 2.2.10 and SDK ≥ 0.0.15 (pinned in `package.json` / `app.json`).

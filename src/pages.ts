@@ -185,7 +185,7 @@ export function playPage(listPage: ListPage, settings: Settings, kbContent = kbT
 export function helpText(settings: Settings): string {
   const picking =
     settings.picker === 'keyboard'
-      ? ['Swipe to move along the keys, tap to type. Hold to delete.', 'Tap ENTER to guess. Menu: tap, then hold.']
+      ? ['Swipe to walk the keys. Tap types. Hold deletes.', 'Tap ENTER to guess. Menu: tap then hold.']
       : settings.picker === 'horizontal'
       ? ['Swipe to move along the letters, tap to type. Hold to delete.', 'Pick ENTER to guess. Menu: tap, then hold.']
       : ['Swipe to pick a letter, tap to type it. Hold to delete.', 'More letters: MORE >>.  Menu: tap, then hold.']

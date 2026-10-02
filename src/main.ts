@@ -11,6 +11,7 @@ import {
 import { Wordlens, type Host } from './controller'
 import { EV, type RawEvent } from './input'
 import { DEFAULT_SETTINGS, NAMES, type Settings } from './config'
+import { demoFromUrl } from './demo'
 
 // input.ts mirrors the SDK enum to stay SDK-free for tests; fail loudly if they drift.
 const ENUM_PAIRS: Array<[number, number]> = [
@@ -119,7 +120,11 @@ const host: Host = {
   },
 }
 
+// Dev only (store screenshots): ?demo=… plays a fixed round from memory; see demo.ts.
+const demo = await demoFromUrl(location.search)
+if (demo) host.kv = demo.kv
 const app = new Wordlens(host, { settings })
+if (demo) app.kbFocus = demo.focus
 const unsubscribe = bridge.onEvenHubEvent((event) => {
   app.handle(event as RawEvent)
   const sys = event.sysEvent
