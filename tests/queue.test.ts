@@ -18,7 +18,19 @@ function harness(fail: (n: number) => boolean = () => false) {
       log.push(`${t.containerName}${b[0]}`)
       return !fail(b[0])
     },
-    { gapMs: 100, retryMs: 300, sleep: async () => {} },
+    {
+      gapMs: 100,
+      retryMs: 300,
+      sleep: async () => {},
+      sendText: async (t, c) => {
+        inFlight++
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        await Promise.resolve()
+        inFlight--
+        log.push(`${t.containerName}:${c}`)
+        return true
+      },
+    },
   )
   return { q, log, max: () => maxInFlight }
 }
@@ -32,6 +44,24 @@ describe('CommandQueue', () => {
     q.image(B, bytes(1))
     await q.idle()
     expect(log).toEqual(['a1', 'a3', 'b1'])
+    expect(max()).toBe(1)
+  })
+
+  it('text updates coalesce and jump ahead of waiting frames, but not of ops', async () => {
+    const { q, log, max } = harness()
+    q.image(A, bytes(1)) // in flight
+    q.image(B, bytes(1)) // waiting
+    q.text(A, () => 'x')
+    q.text(A, () => 'y') // replaces 'x'
+    await q.idle()
+    expect(log).toEqual(['a1', 'a:y', 'b1'])
+    const ran: string[] = []
+    q.image(A, bytes(2))
+    void q.op(async () => void ran.push('op'))
+    q.text(A, () => 'z')
+    await q.idle()
+    expect(ran).toEqual(['op'])
+    expect(log.slice(3)).toEqual(['a2', 'a:z'])
     expect(max()).toBe(1)
   })
 

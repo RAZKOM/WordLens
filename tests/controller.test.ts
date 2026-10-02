@@ -6,6 +6,7 @@ const LIST_PAGES = listPages('frequency')
 import { EV } from '../src/input'
 import type { PageContainers } from '../src/pages'
 import { KEYS, type KeyValueStore } from '../src/storage'
+import { KB_KEYS, kbText } from '../src/textkb'
 
 const WORDS = ['crane', 'slate', 'abbey', 'eerie', 'mourn']
 const VALID = new Set([...WORDS, 'babes', 'ghoul', 'fizzy', 'wacky', 'llama'])
@@ -42,6 +43,7 @@ class ManualTimers implements Timers {
 function makeHost(kv = new MemKV(), createOk = true) {
   const log: string[] = []
   const rebuilds: PageContainers[] = []
+  const texts: string[] = []
   let inFlight = 0
   let overlap = false
   const host: Host = {
@@ -65,13 +67,22 @@ function makeHost(kv = new MemKV(), createOk = true) {
       log.push(`img:${t.containerName}`)
       return true
     },
+    async updateText(t, content) {
+      if (inFlight > 0) overlap = true
+      inFlight++
+      await Promise.resolve()
+      inFlight--
+      texts.push(content)
+      log.push(`text:${t.containerName}`)
+      return true
+    },
     async shutDown(mode) {
       log.push(`shutdown:${mode}`)
       return true
     },
     kv,
   }
-  return { host, kv, log, rebuilds, overlapped: () => overlap }
+  return { host, kv, log, rebuilds, texts, overlapped: () => overlap }
 }
 
 async function boot(
@@ -300,6 +311,55 @@ describe('Wordlens controller', () => {
     await app.settle()
     expect(rebuilds.at(-1)!.imageObject![0].containerName).toBe('stats-chart')
     expect(log.at(-1)).toBe('img:stats-chart')
+  })
+
+  it('keyboard picker: swipes move the focus with text updates only, taps type, marks blank letters', async () => {
+    const { app, rebuilds, log, texts } = await boot(new MemKV(), 1, true, { picker: 'keyboard' })
+    const page = rebuilds[0]
+    expect(page.listObject).toBeUndefined()
+    expect(page.imageObject!.map((i) => i.containerName)).toEqual(['board', 'keys', 'kb-left', 'kb-right'])
+    const [capture, kb] = page.textObject!
+    expect([capture.isEventCapture, capture.content, kb.isEventCapture]).toEqual([1, ' ', 0])
+    expect(kb.content).toBe(kbText(0))
+    expect(log).toEqual(expect.arrayContaining(['img:board', 'img:keys', 'img:kb-left', 'img:kb-right']))
+    expect(texts).toEqual([]) // the page was built with the current keyboard text
+
+    const swipe = (dir: 1 | -1) => app.handle({ textEvent: { containerID: 5, eventType: dir === 1 ? 2 : 1 } })
+    const goTo = (label: string) => {
+      while (KB_KEYS[app.kbFocus].label !== label) swipe(1)
+    }
+    log.length = 0
+    swipe(1)
+    await app.settle()
+    expect(log).toEqual(['text:kb-text']) // no image for a focus move
+    expect(texts.at(-1)!.split('\n')[0]).toContain('［Ｗ］')
+    swipe(-1)
+    swipe(-1) // wraps to DEL
+    expect(KB_KEYS[app.kbFocus].label).toBe('DEL')
+
+    const wrong = WORDS.find((w) => w !== app.round.target && ![...w].some((c) => app.round.target.includes(c)))
+    const guess = wrong ?? WORDS.find((w) => w !== app.round.target)!
+    for (const ch of guess.toUpperCase()) {
+      goTo(ch)
+      app.handle({ sysEvent: {} }) // tap
+    }
+    expect(app.round.typed).toBe(guess)
+    app.handle({ sysEvent: { eventType: 9 } }) // hold deletes
+    expect(app.round.typed).toBe(guess.slice(0, -1))
+    goTo(guess.at(-1)!.toUpperCase())
+    app.handle({ sysEvent: {} })
+    log.length = 0
+    goTo('ENTER')
+    app.handle({ sysEvent: {} })
+    await app.settle()
+    expect(app.round.guesses).toEqual([guess])
+    // The marks changed: the key images are re-sent and the text blanks the letters the image now draws.
+    expect(log).toEqual(expect.arrayContaining(['img:kb-left', 'img:kb-right', 'text:kb-text']))
+    const absent = [...guess].find((c) => !app.round.target.includes(c))
+    if (absent) expect(texts.at(-1)).not.toContain(String.fromCharCode(absent.toUpperCase().charCodeAt(0) - 0x21 + 0xff01))
+    // native list events are ignored in keyboard mode
+    app.handle({ listEvent: { currentSelectItemIndex: 5 } })
+    await app.settle()
   })
 
   it('horizontal picker: swipes move a wrapping carousel, tap types, no list pages', async () => {

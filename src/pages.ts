@@ -8,6 +8,7 @@ import { IDS, MENU, NAMES, listPages, type ListPage, type Settings } from './con
 import { winRate, type Stats } from './game'
 import { CANVAS_H, CANVAS_W, IMAGE_H, IMAGE_W } from './render/layout'
 import { STRIP_IMG } from './render/strip'
+import { KB, kbText } from './textkb'
 
 export type PageName = 'play' | 'help' | 'stats'
 
@@ -49,7 +50,11 @@ export const STRIP_POS = {
   y: IMAGE_H + (CANVAS_H - IMAGE_H - STRIP_IMG.h) / 2,
 } as const
 
-export function playPage(listPage: ListPage, settings: Settings): PageContainers {
+/**
+ * @param kbContent keyboard mode: the keyboard text to create the page with (focus and blanked letters), so
+ *   a rebuild shows the current state without a text update.
+ */
+export function playPage(listPage: ListPage, settings: Settings, kbContent = kbText(0)): PageContainers {
   const x = topImageX(settings)
   const imageObject: Array<Record<string, unknown>> = [
     {
@@ -71,6 +76,49 @@ export function playPage(listPage: ListPage, settings: Settings): PageContainers
       zOrderIndex: 3,
     },
   ]
+
+  if (settings.picker === 'keyboard') {
+    // Bottom band: two images with the key frames and marks; a blank text container under everything catches
+    // swipes and taps (a capture box holding text would scroll and bounce on every swipe on G2), and the
+    // keyboard text sits on top, sized to its 3 lines.
+    imageObject.push(
+      { xPosition: 0, yPosition: IMAGE_H, width: IMAGE_W, height: IMAGE_H, containerID: IDS.play.kbLeft, containerName: NAMES.kbLeft, zOrderIndex: 4 },
+      { xPosition: IMAGE_W, yPosition: IMAGE_H, width: IMAGE_W, height: IMAGE_H, containerID: IDS.play.kbRight, containerName: NAMES.kbRight, zOrderIndex: 5 },
+    )
+    return {
+      containerTotalNum: 6,
+      imageObject,
+      textObject: [
+        {
+          xPosition: 0,
+          yPosition: IMAGE_H,
+          width: CANVAS_W,
+          height: CANVAS_H - IMAGE_H,
+          borderWidth: 0,
+          paddingLength: 0,
+          containerID: IDS.play.capture,
+          containerName: NAMES.capture,
+          content: ' ',
+          isEventCapture: 1,
+          zOrderIndex: 1,
+        },
+        {
+          xPosition: KB.boxX,
+          yPosition: KB.boxY,
+          width: KB.cols * KB.cell,
+          height: CANVAS_H - KB.boxY,
+          borderWidth: 0,
+          paddingLength: 0,
+          containerID: IDS.play.kbText,
+          containerName: NAMES.kbText,
+          content: kbContent,
+          isEventCapture: 0,
+          zOrderIndex: 6,
+        },
+      ],
+      menuObject: { menuItems: PLAY_MENU },
+    }
+  }
 
   if (settings.picker === 'horizontal') {
     // A blank text container catches the swipes (each one arrives as a
@@ -136,7 +184,9 @@ export function playPage(listPage: ListPage, settings: Settings): PageContainers
 
 export function helpText(settings: Settings): string {
   const picking =
-    settings.picker === 'horizontal'
+    settings.picker === 'keyboard'
+      ? ['Swipe to move along the keys, tap to type. Hold to delete.', 'Tap ENTER to guess. Menu: tap, then hold.']
+      : settings.picker === 'horizontal'
       ? ['Swipe to move along the letters, tap to type. Hold to delete.', 'Pick ENTER to guess. Menu: tap, then hold.']
       : ['Swipe to pick a letter, tap to type it. Hold to delete.', 'More letters: MORE >>.  Menu: tap, then hold.']
   return [...picking, 'Tap to go back. Double-tap to exit.'].join('\n')

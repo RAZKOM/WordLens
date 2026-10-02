@@ -9,7 +9,7 @@ Six guesses per word, a streak and guess distribution that survive a full app re
 
 ```bash
 npm install
-npm test               # 60 unit + play-through tests
+npm test               # 68 unit + play-through tests
 npm run dev            # Vite on :5173
 npm run simulate       # in a second terminal: evenhub-simulator against :5173
 npm run qr             # QR code to sideload the dev server onto your phone
@@ -27,12 +27,16 @@ Edit `DEFAULT_SETTINGS` in `src/config.ts`:
 | --- | --- | --- | --- |
 | `boardSide` | `'right'` / `'left'` | `'right'` | Side of the guess board. Right keeps it visible while the OS menu (which opens over the left) is showing. |
 | `letterOrder` | `'frequency'` / `'alphabetical'` | `'frequency'` | Letter order in the picker. |
-| `picker` | `'vertical'` / `'horizontal'` | `'vertical'` | Vertical = the native list (firmware-drawn, 20-item limit, so letters span two pages). Horizontal = a drawn carousel with all 28 items on one wrapping strip. |
+| `picker` | `'keyboard'` / `'vertical'` / `'horizontal'` | `'keyboard'` | Keyboard = QWERTY with ENTER and DEL, letters as firmware text over drawn key frames; a swipe moves the focus with a text update (~60 ms), no image send, and the keys show the letter marks. Vertical = the native list (firmware-drawn, 20-item limit, so letters span two pages). Horizontal = a drawn carousel with all 28 items on one wrapping strip. |
 
 For quick testing without editing code, URL parameters override the defaults:
 `http://localhost:5173/?picker=horizontal&order=alphabetical&board=left`
 
 ## How to play
+
+With the keyboard (default): swipe to walk the keys (Q → P, A → L, ENTER, Z → M, DEL, then around again);
+brackets mark the key you are on. Tap types it; tap ENTER to guess. Hold deletes, tap-then-hold opens the menu,
+double-tap exits. The keys carry the same marks as the board. The two pickers below are still available.
 
 | Gesture | Vertical picker | Horizontal picker | Help / Stats |
 | --- | --- | --- | --- |
@@ -53,7 +57,26 @@ Dim marks (absent letters, empty cells) stay visible.
 **Stats** shows streak, best, played, wins and win rate, plus a bar chart of guesses per game
 (1–6, and L for losses and give-ups). Wins are solid bars, L is an outline, and your latest game's bar is full brightness.
 
-## Layout (defaults)
+## Layout
+
+Keyboard picker (default):
+
+```
++---------------------------+---------------------------+
+| STREAK n   BEST n         | board 6×5 | message strip |   two 288×144 images
+| marks legend, gestures    |           |               |
++---------------------------+---------------------------+
+| key frames + marks: two 288×144 images                |
+| keyboard text (fullwidth, 20 px cells, 27 px lines)   |   text box on top, not the capture
+| blank text container underneath: isEventCapture: 1    |
++-------------------------------------------------------+
+```
+
+Fullwidth characters are monospaced in the G2 font, so the text is a grid and the frames are drawn on it (see
+`src/textkb.ts`). Letters in the right spot or not in the word are drawn by the image (dark on a fill, or dim
+with a strike) and blanked in the text, since text has one brightness.
+
+List and carousel pickers:
 
 ```
 +---------------------------+---------------------------+
@@ -76,8 +99,9 @@ Dim marks (absent letters, empty cells) stay visible.
 | `src/words/` | Packed answer list (2,069) and allowlist (8,679). Generated. |
 | `src/storage.ts` | Typed, defensive `get/setLocalStorage` wrapper. |
 | `src/input.ts` | Raw events → inputs. Handles missing `eventType` / index per envelope. |
-| `src/imageQueue.ts` | The only caller of `updateImageRawData`. Serial, coalescing, rebuild-aware. |
-| `src/render/` | 4-bit framebuffer, 5×7 pixel font, board / keys / help / chart / carousel renderers, PNG encoder. |
+| `src/imageQueue.ts` | The only caller of `updateImageRawData` and `textContainerUpgrade`. Serial, coalescing, rebuild-aware; text updates jump ahead of waiting images. |
+| `src/textkb.ts` | The text keyboard: key grid, keyboard text with ［ ］ focus, key frames and marks. Pure. |
+| `src/render/` | 4-bit framebuffer, 5×7 pixel font, board / keys / info / help / chart / carousel renderers, PNG encoder. |
 | `src/pages.ts` | Container layouts and menus for Play (both pickers), Help, Stats. |
 | `src/controller.ts` | State machine: rounds, pages, pickers, persistence, drawing. Host is injected. |
 | `src/main.ts` | SDK bridge wiring, URL setting overrides, phone page that mirrors the glasses frames. |

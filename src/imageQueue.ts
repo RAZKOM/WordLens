@@ -9,6 +9,9 @@
  *    are about to be recreated); callers enqueue fresh frames after it.
  *  - A failed send is retried once after retryMs, unless a newer frame for the
  *    same container is already waiting; then it is dropped.
+ *  - Text updates (the text keyboard) coalesce per container too, and jump ahead
+ *    of waiting image frames (not of rebuilds): a focus move costs ~60 ms and
+ *    should not wait behind a board redraw.
  */
 
 export interface ImageTarget {
@@ -17,10 +20,12 @@ export interface ImageTarget {
 }
 
 export type ImageSend = (target: ImageTarget, bytes: Uint8Array) => Promise<boolean>
+export type TextSend = (target: ImageTarget, content: string) => Promise<boolean>
 export type Sleep = (ms: number) => Promise<void>
 
 type Task =
   | { kind: 'image'; target: ImageTarget; render: () => Uint8Array }
+  | { kind: 'text'; target: ImageTarget; content: () => string }
   | { kind: 'op'; run: () => Promise<void> }
 
 export const realSleep: Sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -33,7 +38,7 @@ export class CommandQueue {
 
   constructor(
     private send: ImageSend,
-    private opts: { gapMs: number; retryMs: number; sleep?: Sleep; now?: () => number } = { gapMs: 100, retryMs: 300 },
+    private opts: { gapMs: number; retryMs: number; sleep?: Sleep; now?: () => number; sendText?: TextSend } = { gapMs: 100, retryMs: 300 },
   ) {}
 
   private get sleep(): Sleep {
@@ -49,12 +54,33 @@ export class CommandQueue {
     for (let i = this.tasks.length - 1; i >= 0; i--) {
       const t = this.tasks[i]
       if (t.kind === 'op') break
-      if (t.target.containerID === target.containerID) {
+      if (t.kind === 'image' && t.target.containerID === target.containerID) {
         this.tasks[i] = { kind: 'image', target, render }
         return
       }
     }
     this.tasks.push({ kind: 'image', target, render })
+    this.pump()
+  }
+
+  /**
+   * Queue (or replace) a text update. It goes after the last queued rebuild but before waiting image frames;
+   * `content` is read at send time, so only the latest text is sent.
+   */
+  text(target: ImageTarget, content: () => string): void {
+    let at = 0
+    for (let i = this.tasks.length - 1; i >= 0; i--) {
+      const t = this.tasks[i]
+      if (t.kind === 'op') {
+        at = i + 1
+        break
+      }
+      if (t.kind === 'text' && t.target.containerID === target.containerID) {
+        this.tasks[i] = { kind: 'text', target, content }
+        return
+      }
+    }
+    this.tasks.splice(at, 0, { kind: 'text', target, content })
     this.pump()
   }
 
@@ -101,6 +127,10 @@ export class CommandQueue {
           await task.run()
           continue
         }
+        if (task.kind === 'text') {
+          await this.trySendText(task)
+          continue
+        }
         const wait = this.lastImageAt + this.opts.gapMs - this.now()
         if (wait > 0) await this.sleep(wait)
         let ok = await this.trySend(task)
@@ -119,6 +149,15 @@ export class CommandQueue {
       const waiters = this.idleWaiters
       this.idleWaiters = []
       waiters.forEach((w) => w())
+    }
+  }
+
+  private async trySendText(task: Extract<Task, { kind: 'text' }>): Promise<void> {
+    try {
+      if (!this.opts.sendText) throw new Error('no text sender')
+      if (!(await this.opts.sendText(task.target, task.content()))) console.warn('[wordlens] text update failed', task.target.containerName)
+    } catch (err) {
+      console.warn('[wordlens] text update threw', err)
     }
   }
 

@@ -32,22 +32,26 @@ import {
   type Round,
   type Stats,
 } from './game'
-import { CommandQueue, type ImageSend, type Sleep } from './imageQueue'
+import { CommandQueue, type ImageSend, type Sleep, type TextSend } from './imageQueue'
 import { parseEvent, resolveListItem, type Input, type RawEvent } from './input'
 import { helpPage, playPage, statsPage, type PageContainers, type PageName } from './pages'
 import { renderBoard, type Message } from './render/board'
 import { renderDistribution } from './render/chart'
 import { renderStrip } from './render/strip'
 import { renderHelp } from './render/help'
+import { renderInfo } from './render/info'
 import { renderKeys } from './render/keys'
 import { encodePng } from './render/png'
 import { Storage, WriteChain, type KeyValueStore } from './storage'
+import { KB_KEYS, drawnByImage, kbHalf, kbText, renderKbBand } from './textkb'
 import { TARGETS, isValidGuess } from './words'
 
 export interface Host {
   createPage(c: PageContainers): Promise<boolean>
   rebuildPage(c: PageContainers): Promise<boolean>
   sendImage: ImageSend
+  /** Text container content (keyboard mode). */
+  updateText: TextSend
   shutDown(mode: 0 | 1): Promise<boolean>
   kv: KeyValueStore
 }
@@ -83,6 +87,11 @@ export class Wordlens {
   locked = false
   /** Horizontal picker position (index into stripItems); starts on the first letter. */
   stripIndex = 2
+  /** Keyboard picker focus (index into KB_KEYS); starts on Q. */
+  kbFocus = 0
+  /** Keyboard text the glasses show now (set by a page build or a sent update). */
+  private kbShown = ''
+  private kbPending = false
   readonly settings: Settings
 
   readonly queue: CommandQueue
@@ -109,6 +118,7 @@ export class Wordlens {
       gapMs: TIMING.imageGapMs,
       retryMs: TIMING.imageRetryMs,
       sleep: opts.sleep,
+      sendText: (t, c) => host.updateText(t, c),
     })
   }
 
@@ -135,7 +145,7 @@ export class Wordlens {
     }
 
     await this.queue.op(async () => {
-      const page = playPage(this.listPage, this.settings)
+      const page = this.containersFor('play')
       if (await this.host.createPage(page)) return
       // A WebView reload leaves the startup page in place, so create fails:
       // rebuild over it instead of staying on a stale page.
@@ -169,19 +179,21 @@ export class Wordlens {
         return
       case 'tap':
         if (this.page !== 'play') this.goto('play')
+        else if (this.keyboard) this.onListItem(KB_KEYS[this.kbFocus].label)
         else if (this.horizontal) this.onListItem(this.strip[this.stripIndex])
         return
       case 'longPress':
         if (this.page === 'play') this.backspace()
         return
       case 'listSelect':
-        if (this.page !== 'play' || this.horizontal) return
+        if (this.page !== 'play' || this.horizontal || this.keyboard) return
         this.onListItem(resolveListItem(this.listItems, input.index, input.name))
         return
       case 'scrollBottom':
       case 'scrollTop':
         if (this.page !== 'play') return
-        if (this.horizontal) this.moveStrip(input.kind === 'scrollBottom' ? 1 : -1)
+        if (this.keyboard) this.moveKb(input.kind === 'scrollBottom' ? 1 : -1)
+        else if (this.horizontal) this.moveStrip(input.kind === 'scrollBottom' ? 1 : -1)
         else if (EDGE_SCROLL_SWAPS_PAGES) this.swapList()
         return
       case 'ignore':
@@ -199,6 +211,10 @@ export class Wordlens {
     return this.settings.picker === 'horizontal'
   }
 
+  private get keyboard(): boolean {
+    return this.settings.picker === 'keyboard'
+  }
+
   private get listItems(): readonly string[] {
     return listPages(this.settings.letterOrder)[this.listPage]
   }
@@ -212,6 +228,13 @@ export class Wordlens {
     const n = this.strip.length
     this.stripIndex = (((this.stripIndex + step) % n) + n) % n
     this.drawStrip()
+  }
+
+  /** Keyboard picker: one key along, wrapping through all rows. Costs a text update, no image. */
+  moveKb(step: number): void {
+    const n = KB_KEYS.length
+    this.kbFocus = (((this.kbFocus + step) % n) + n) % n
+    this.drawKbText()
   }
 
   private onMenu(id: number): void {
@@ -335,7 +358,10 @@ export class Wordlens {
   private containersFor(page: PageName): PageContainers {
     if (page === 'help') return helpPage(this.settings)
     if (page === 'stats') return statsPage(this.stats)
-    return playPage(this.listPage, this.settings)
+    if (!this.keyboard) return playPage(this.listPage, this.settings)
+    // The page is created with the current keyboard text, so it needs no update after the build.
+    this.kbShown = this.currentKbText()
+    return playPage(this.listPage, this.settings, this.kbShown)
   }
 
   goto(page: PageName): void {
@@ -391,9 +417,34 @@ export class Wordlens {
 
   private drawKeys(): void {
     if (this.page !== 'play') return
+    if (this.keyboard) {
+      // The info image takes the keys slot; the marks are on the keyboard below.
+      this.queue.image({ containerID: IDS.play.keys, containerName: NAMES.keys }, () => encodePng(renderInfo(this.stats)))
+      const band = () => renderKbBand(keyMarks(this.round.guesses, this.round.target))
+      this.queue.image({ containerID: IDS.play.kbLeft, containerName: NAMES.kbLeft }, () => encodePng(kbHalf(band(), 'left')))
+      this.queue.image({ containerID: IDS.play.kbRight, containerName: NAMES.kbRight }, () => encodePng(kbHalf(band(), 'right')))
+      this.drawKbText()
+      return
+    }
     this.queue.image({ containerID: IDS.play.keys, containerName: NAMES.keys }, () =>
       encodePng(renderKeys(keyMarks(this.round.guesses, this.round.target), this.stats)),
     )
+  }
+
+  private currentKbText(): string {
+    return kbText(this.kbFocus, drawnByImage(keyMarks(this.round.guesses, this.round.target)))
+  }
+
+  /** Sends the keyboard text if it changed (focus moved, or a guess blanked letters the image now draws). */
+  private drawKbText(): void {
+    if (this.page !== 'play' || !this.keyboard) return
+    if (!this.kbPending && this.currentKbText() === this.kbShown) return
+    this.kbPending = true
+    this.queue.text({ containerID: IDS.play.kbText, containerName: NAMES.kbText }, () => {
+      this.kbPending = false
+      this.kbShown = this.currentKbText()
+      return this.kbShown
+    })
   }
 
   private drawStrip(): void {

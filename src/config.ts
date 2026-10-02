@@ -11,22 +11,24 @@ export interface Settings {
   /** Letter order in the picker: most frequent first, or A–Z. */
   letterOrder: 'frequency' | 'alphabetical'
   /**
+   * 'keyboard': a QWERTY keyboard with ENTER and DEL, letters as firmware text over key frames; swipes walk
+   * the keys (~60 ms each, no image send) and it shows the letter marks.
    * 'vertical': the native list (firmware-drawn, 20-item limit, so letters span two pages).
    * 'horizontal': a drawn carousel; swipes move left/right through all 28 items, no pages.
    */
-  picker: 'vertical' | 'horizontal'
+  picker: 'keyboard' | 'vertical' | 'horizontal'
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   boardSide: 'right',
   letterOrder: 'alphabetical',
-  picker: 'horizontal',
+  picker: 'keyboard',
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 
 export const IDS = {
-  play: { board: 1, keys: 2, list: 3, strip: 4, capture: 5 },
+  play: { board: 1, keys: 2, list: 3, strip: 4, capture: 5, kbLeft: 6, kbRight: 7, kbText: 8 },
   help: { image: 1, text: 2 },
   stats: { text: 1, chart: 2 },
 } as const
@@ -37,6 +39,9 @@ export const NAMES = {
   list: 'letters',
   strip: 'strip',
   capture: 'capture',
+  kbLeft: 'kb-left',
+  kbRight: 'kb-right',
+  kbText: 'kb-text',
   helpImage: 'help-img',
   helpText: 'help-text',
   statsText: 'stats-text',

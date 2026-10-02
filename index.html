@@ -96,6 +96,30 @@
         image-rendering: pixelated;
         filter: sepia(1) hue-rotate(60deg) saturate(3.2) brightness(1.05);
       }
+      /* Keyboard mode: the bottom band (576×144) with the keyboard text over the key-frame images. */
+      .kb-band {
+        position: relative;
+        container-type: inline-size;
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
+      .kb-band img {
+        width: 100%;
+        aspect-ratio: 2 / 1;
+        image-rendering: pixelated;
+        filter: sepia(1) hue-rotate(60deg) saturate(3.2) brightness(1.05);
+      }
+      .kb-band pre {
+        position: absolute;
+        /* The glasses' text box: x 8, y 31 in the band; 20 px cells, 27 px lines (of 576). */
+        left: calc(8 / 576 * 100cqw);
+        top: calc(31 / 576 * 100cqw);
+        margin: 0;
+        font: calc(20 / 576 * 100cqw) / calc(27 / 20) monospace;
+        color: #c6e2a4;
+      }
+      .kb-band[hidden] { display: none; }
       .tips, .marks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
       .tips li, .marks li { display: grid; grid-template-columns: 7.4rem 1fr; gap: 12px; align-items: start; }
       .tips strong, .marks strong {
@@ -147,6 +171,11 @@
         <div class="mirror">
           <img id="mirror-left" alt="" />
           <img id="mirror-right" alt="" />
+          <div class="kb-band" id="mirror-kb" hidden>
+            <img id="mirror-kb-left" alt="" />
+            <img id="mirror-kb-right" alt="" />
+            <pre id="mirror-kb-text"></pre>
+          </div>
         </div>
       </section>
 
@@ -155,7 +184,7 @@
         <ol class="tips">
           <li>
             <strong>Swipe, then tap</strong>
-            <span>Move along the letters. A tap types the one in the centre.</span>
+            <span>Move along the keys; brackets mark the one you are on. A tap types it, or ENTER guesses.</span>
           </li>
           <li>
             <strong>Hold</strong>
