@@ -1,4 +1,5 @@
 import { ALLOWLIST_PACKED } from './allowlist'
+import { SPOKEN_PACKED } from './spoken'
 import { TARGETS_PACKED } from './targets'
 
 function unpack(packed: string): string[] {
@@ -9,6 +10,9 @@ function unpack(packed: string): string[] {
 
 /** Answers, in a fixed sorted order (the deck shuffles indices into this list). */
 export const TARGETS: readonly string[] = unpack(TARGETS_PACKED)
+
+/** Allowed guesses the voice model can recognise (the voice grammar). */
+export const SPOKEN: readonly string[] = unpack(SPOKEN_PACKED)
 
 const allow = new Set(unpack(ALLOWLIST_PACKED))
 

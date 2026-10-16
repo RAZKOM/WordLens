@@ -31,3 +31,10 @@ The full SCOWL notice, including the component lists it credits, is in
 ## Even Hub SDK
 
 `@evenrealities/even_hub_sdk` is used under its own license (see its package).
+
+## Speech recognition
+
+- [vosk-browser](https://github.com/ccoreilly/vosk-browser) (npm dependency): Apache License 2.0.
+- Vosk small English model `vosk-model-small-en-us-0.15` (https://alphacephei.com/vosk/models): Apache
+  License 2.0. Downloaded by `npm run voice-model` to `public/vosk/model.tar.gz` and shipped inside the
+  `.ehpk`; not committed. `src/words/spoken.ts` lists the allowlist words found in its vocabulary.

@@ -20,7 +20,7 @@ describe('parseEvent', () => {
   it('long press deletes; the release does not fire again', () => {
     expect(parseEvent({ sysEvent: { eventType: EV.LONG_PRESS } })).toEqual({ kind: 'longPress' })
     expect(parseEvent({ textEvent: { eventType: EV.LONG_PRESS } })).toEqual({ kind: 'longPress' })
-    expect(parseEvent({ listEvent: { eventType: EV.LONG_PRESS_RELEASE } })).toEqual({ kind: 'ignore' })
+    expect(parseEvent({ listEvent: { eventType: EV.LONG_PRESS_RELEASE } })).toEqual({ kind: 'longPressRelease' })
   })
   it('menu clicks carry the item id', () => {
     expect(parseEvent({ menuItemClickEvent: { itemID: 4 } })).toEqual({ kind: 'menu', itemID: 4 })

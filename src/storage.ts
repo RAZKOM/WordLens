@@ -23,6 +23,8 @@ export const KEYS = {
   lastAnswer: 'wordlens_last_answer',
   round: 'wordlens_round',
   dist: 'wordlens_dist',
+  hold: 'wordlens_hold',
+  keys: 'wordlens_keys',
 } as const
 
 const WORD = /^[a-z]{5}$/
@@ -81,6 +83,10 @@ export interface Saved {
   deck: DeckState | null
   lastAnswer: string | null
   round: Round | null
+  /** Saved hold action (menu toggle), or null if never set. */
+  hold: 'delete' | 'talk' | null
+  /** Saved keyboard choice (menu toggle), or null if never set. */
+  keys: 'full' | 'controls' | null
 }
 
 async function safeGet(kv: KeyValueStore, key: string): Promise<string> {
@@ -96,7 +102,7 @@ export class Storage {
   constructor(private kv: KeyValueStore) {}
 
   async load(): Promise<Saved> {
-    const [streak, best, played, wins, seed, index, last, round, dist] = await Promise.all(
+    const [streak, best, played, wins, seed, index, last, round, dist, hold, keys] = await Promise.all(
       [
         KEYS.streak,
         KEYS.best,
@@ -107,6 +113,8 @@ export class Storage {
         KEYS.lastAnswer,
         KEYS.round,
         KEYS.dist,
+        KEYS.hold,
+        KEYS.keys,
       ].map((k) => safeGet(this.kv, k)),
     )
     const d = parseDist(dist)
@@ -129,6 +137,8 @@ export class Storage {
       deck: seedN !== null && indexN !== null ? { seed: seedN, index: indexN } : null,
       lastAnswer: WORD.test(last.trim()) ? last.trim() : null,
       round: parseRound(round),
+      hold: hold.trim() === 'talk' || hold.trim() === 'delete' ? (hold.trim() as 'delete' | 'talk') : null,
+      keys: keys.trim() === 'full' || keys.trim() === 'controls' ? (keys.trim() as 'full' | 'controls') : null,
     }
   }
 
@@ -153,6 +163,14 @@ export class Storage {
     await this.put(KEYS.deckSeed, String(d.seed))
     await this.put(KEYS.deckIndex, String(d.index))
     await this.put(KEYS.lastAnswer, lastAnswer ?? '')
+  }
+
+  async saveHold(hold: 'delete' | 'talk'): Promise<void> {
+    await this.put(KEYS.hold, hold)
+  }
+
+  async saveKeys(keys: 'full' | 'controls'): Promise<void> {
+    await this.put(KEYS.keys, keys)
   }
 
   async saveRound(r: Round | null): Promise<void> {

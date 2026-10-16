@@ -34,7 +34,8 @@ import {
 } from './game'
 import { CommandQueue, type ImageSend, type Sleep, type TextSend } from './imageQueue'
 import { parseEvent, resolveListItem, type Input, type RawEvent } from './input'
-import { helpPage, playPage, statsPage, type PageContainers, type PageName } from './pages'
+import { controlsShown, helpPage, panelSpot, playMenu, playPage, statsPage, voiceUsable, type PageContainers, type PageName } from './pages'
+import { CONTROLS, controlsRow, letterStatus, stepControl } from './controls'
 import { renderBoard, type Message } from './render/board'
 import { renderDistribution } from './render/chart'
 import { renderStrip } from './render/strip'
@@ -45,6 +46,9 @@ import { encodePng } from './render/png'
 import { Storage, WriteChain, type KeyValueStore } from './storage'
 import { KB_KEYS, drawnByImage, kbHalf, kbText, renderKbBand } from './textkb'
 import { TARGETS, isValidGuess } from './words'
+import { buildCandidates, type Candidate } from './voice/candidates'
+import { idleCardText, modalText, panelFrame, type VoicePhase } from './voice/modal'
+import type { VoiceInput } from './voice/session'
 
 export interface Host {
   createPage(c: PageContainers): Promise<boolean>
@@ -54,6 +58,8 @@ export interface Host {
   updateText: TextSend
   shutDown(mode: 0 | 1): Promise<boolean>
   kv: KeyValueStore
+  /** Push-to-talk input; without it the hold toggle is not offered and hold always deletes. */
+  voice?: VoiceInput
 }
 
 export interface Timers {
@@ -92,6 +98,18 @@ export class Wordlens {
   /** Keyboard text the glasses show now (set by a page build or a sent update). */
   private kbShown = ''
   private kbPending = false
+  voice: VoicePhase = { phase: 'idle' }
+  /** Bumped by every new hold or cancel, so late results from an older clip are dropped. */
+  private voiceTicket = 0
+  private voiceTimer: unknown = null
+  /** Spinner on the voice panel while listening or thinking: a frame counter and its tick. */
+  private spinFrame = 0
+  private spinTimer: unknown = null
+  /** True when the caller fixed `hold` (URL parameter): the saved menu choice does not override it. */
+  private readonly holdPinned: boolean
+  private readonly keysPinned: boolean
+  /** ENTER / DEL controls focus (index into CONTROLS); starts on ENTER. */
+  ctrlFocus = 0
   readonly settings: Settings
 
   readonly queue: CommandQueue
@@ -109,6 +127,8 @@ export class Wordlens {
     opts: Options = {},
   ) {
     this.settings = { ...DEFAULT_SETTINGS, ...opts.settings }
+    this.holdPinned = opts.settings?.hold !== undefined
+    this.keysPinned = opts.settings?.keys !== undefined
     this.timers = opts.timers ?? realTimers
     this.seed = opts.seed ?? randomSeed
     this.words = opts.words ?? TARGETS
@@ -128,6 +148,10 @@ export class Wordlens {
     const saved = await this.storage.load()
     this.stats = saved.stats
     this.lastAnswer = saved.lastAnswer
+    if (saved.hold && !this.holdPinned) this.settings.hold = saved.hold
+    if (saved.keys && !this.keysPinned) this.settings.keys = saved.keys
+    // Unpacking the model takes a while the first time: start before the first hold.
+    if (this.talkMode) this.host.voice?.prepare()
     this.deck = saved.deck && isValidDeck(this.words, saved.deck) ? saved.deck : freshDeck(this.words, saved.lastAnswer, this.seed)
 
     if (saved.round && !isFinished(saved.round)) {
@@ -165,9 +189,11 @@ export class Wordlens {
     switch (input.kind) {
       case 'doubleTap':
         // Official guidance: double-tap must always reach the exit prompt.
+        this.cancelVoice()
         this.exit()
         return
       case 'menu':
+        this.cancelVoice()
         this.onMenu(input.itemID)
         return
       case 'foregroundEnter':
@@ -176,14 +202,24 @@ export class Wordlens {
         return
       case 'exit':
         this.clearMessageTimer()
+        this.cancelVoice()
         return
       case 'tap':
         if (this.page !== 'play') this.goto('play')
+        else if (this.voice.phase === 'choosing') this.acceptChoice()
+        else if (this.voice.phase === 'message') this.closeVoice()
+        else if (this.modalOpen) return
+        else if (this.controlsMode) this.onListItem(CONTROLS[this.ctrlFocus])
         else if (this.keyboard) this.onListItem(KB_KEYS[this.kbFocus].label)
         else if (this.horizontal) this.onListItem(this.strip[this.stripIndex])
         return
       case 'longPress':
-        if (this.page === 'play') this.backspace()
+        if (this.page !== 'play') return
+        if (this.talkMode) this.startTalk()
+        else this.backspace()
+        return
+      case 'longPressRelease':
+        if (this.voice.phase === 'listening') this.stopTalk()
         return
       case 'listSelect':
         if (this.page !== 'play' || this.horizontal || this.keyboard) return
@@ -192,7 +228,10 @@ export class Wordlens {
       case 'scrollBottom':
       case 'scrollTop':
         if (this.page !== 'play') return
-        if (this.keyboard) this.moveKb(input.kind === 'scrollBottom' ? 1 : -1)
+        if (this.voice.phase === 'choosing') this.moveChoice(input.kind === 'scrollBottom' ? 1 : -1)
+        else if (this.modalOpen) return // listening, decoding or a message: a swipe must not move the keys
+        else if (this.controlsMode) this.moveCtrl(input.kind === 'scrollBottom' ? 1 : -1)
+        else if (this.keyboard) this.moveKb(input.kind === 'scrollBottom' ? 1 : -1)
         else if (this.horizontal) this.moveStrip(input.kind === 'scrollBottom' ? 1 : -1)
         else if (EDGE_SCROLL_SWAPS_PAGES) this.swapList()
         return
@@ -248,6 +287,240 @@ export class Wordlens {
     else if (id === MENU.help) this.goto('help')
     else if (id === MENU.stats) this.goto('stats')
     else if (id === MENU.giveUp) this.giveUp()
+    else if (id === MENU.hold) this.toggleHold()
+    else if (id === MENU.keys) this.toggleKeys()
+  }
+
+  // ───────────────────────────── ENTER / DEL controls ─────────────────────────────
+
+  /** The bottom band shows ENTER / DEL instead of the keyboard (see controlsShown). */
+  get controlsMode(): boolean {
+    return controlsShown(this.settings, this.host.voice !== undefined)
+  }
+
+  toggleKeys(): void {
+    if (!this.talkMode || !this.keyboard) return
+    const keys = this.settings.keys === 'controls' ? 'full' : 'controls'
+    this.settings.keys = keys
+    void this.writes.run(() => this.storage.saveKeys(keys))
+    // The bottom band changes containers (keyboard images ↔ text box), and the menu names the other choice.
+    this.rebuild()
+  }
+
+  /** One step along ENTER, DEL, CLEAR: a text update to the controls row, no image. */
+  moveCtrl(step: number): void {
+    this.ctrlFocus = stepControl(this.ctrlFocus, step)
+    if (this.page !== 'play') return
+    const row = controlsRow(this.ctrlFocus)
+    this.queue.text({ containerID: IDS.play.ctrlText, containerName: NAMES.ctrlText }, () => row)
+  }
+
+  private lettersShown = ''
+
+  private currentLetters(): string {
+    return letterStatus(keyMarks(this.round.guesses, this.round.target))
+  }
+
+  /** Controls mode: the alphabet and its marks, sent only when a guess changed them. */
+  private drawLetters(): void {
+    if (this.page !== 'play' || !this.controlsMode) return
+    const next = this.currentLetters()
+    if (next === this.lettersShown) return
+    this.lettersShown = next
+    this.queue.text({ containerID: IDS.play.ctrlLetters, containerName: NAMES.ctrlLetters }, () => next)
+  }
+
+  /** CLEAR: empty the row being typed. */
+  clearRow(): void {
+    if (this.locked || this.round.typed.length === 0) return
+    this.round = { ...this.round, typed: '' }
+    this.clearInvalidMessage()
+    this.persistRound()
+    this.drawBoard()
+  }
+
+  // ───────────────────────────── push-to-talk ─────────────────────────────
+
+  /** Hold talks (rather than deletes): chosen, and possible with this host and picker. */
+  get talkMode(): boolean {
+    return this.settings.hold === 'talk' && this.hasVoice
+  }
+
+  private get hasVoice(): boolean {
+    return voiceUsable(this.settings, this.host.voice !== undefined)
+  }
+
+  /** Push-to-talk is under way (any phase but idle): the voice panel shows it. */
+  get modalOpen(): boolean {
+    return this.voice.phase !== 'idle'
+  }
+
+  toggleHold(): void {
+    if (!this.hasVoice) return
+    const hold = this.settings.hold === 'talk' ? 'delete' : 'talk'
+    this.settings.hold = hold
+    void this.writes.run(() => this.storage.saveHold(hold))
+    if (hold === 'talk') this.host.voice?.prepare()
+    // The menu names the other choice, so the page is rebuilt with the new menu.
+    this.rebuild()
+  }
+
+  /** Hold started: open the mic and the voice panel. A hold while the panel is up (choosing, a miss) starts over. */
+  startTalk(): void {
+    const voice = this.host.voice
+    if (this.locked || !voice) return
+    const wasOpen = this.modalOpen
+    if (wasOpen) {
+      this.voiceTicket++
+      voice.cancel()
+      this.clearVoiceTimer()
+    }
+    const ticket = ++this.voiceTicket
+    this.clearInvalidMessage()
+    this.setVoice({ phase: 'listening' })
+    this.voiceTimer = this.timers.set(() => {
+      this.voiceTimer = null
+      if (ticket === this.voiceTicket && this.voice.phase === 'listening') this.stopTalk()
+    }, TIMING.talkMaxMs)
+    voice.start().then(
+      (ok) => {
+        if (ok || ticket !== this.voiceTicket || this.voice.phase === 'idle') return
+        this.voiceFailed('NO MIC')
+      },
+      (err) => {
+        console.warn('[wordlens] voice start failed', err)
+        if (ticket === this.voiceTicket && this.modalOpen) this.voiceFailed('NO MIC')
+      },
+    )
+  }
+
+  /** Hold released (or timed out): decode, then list the choices. */
+  stopTalk(): void {
+    const voice = this.host.voice
+    if (!voice || this.voice.phase !== 'listening') return
+    const ticket = this.voiceTicket
+    this.clearVoiceTimer()
+    this.setVoice({ phase: 'thinking' })
+    voice.stop(this.round.typed.length).then(
+      (heard) => {
+        if (ticket !== this.voiceTicket || this.voice.phase !== 'thinking') return
+        const items = heard ? buildCandidates(heard, this.round.typed) : []
+        if (items.length === 0) return this.voiceFailed('MISSED IT')
+        this.setVoice({ phase: 'choosing', items, index: 0 })
+      },
+      (err) => {
+        console.warn('[wordlens] voice recognition failed', err)
+        if (ticket === this.voiceTicket && this.voice.phase === 'thinking') this.voiceFailed('NO VOICE')
+      },
+    )
+  }
+
+  /** One step through the choices (wrapping through CANCEL): a text update, no image. */
+  moveChoice(step: number): void {
+    if (this.voice.phase !== 'choosing') return
+    const n = this.voice.items.length + 1
+    this.setVoice({ ...this.voice, index: (((this.voice.index + step) % n) + n) % n })
+  }
+
+  /** Tap on a choice: a word fills the row and is guessed; letters are added to the row; CANCEL drops it. */
+  acceptChoice(): void {
+    if (this.voice.phase !== 'choosing') return
+    const choice: Candidate | undefined = this.voice.items[this.voice.index]
+    this.closeVoice()
+    if (!choice || this.locked) return
+    if (choice.kind === 'word') {
+      this.round = { ...this.round, typed: choice.word }
+      this.persistRound()
+      this.submit() // draws the guess, or the row with a NOT IN LIST message
+      return
+    }
+    for (const letter of choice.letters) this.type(letter)
+  }
+
+  /** Drop any recording, decode or choice list, and clear the panel. */
+  cancelVoice(): void {
+    if (!this.modalOpen) return
+    this.voiceTicket++
+    this.host.voice?.cancel()
+    this.closeVoice()
+  }
+
+  /** Clear the panel (a text update) and its frame (the board). The keys never left. */
+  private closeVoice(): void {
+    this.clearVoiceTimer()
+    this.setVoice({ phase: 'idle' })
+  }
+
+  /** Say what went wrong in the panel; it clears on a tap, a new hold, or after a while. */
+  private voiceFailed(text: string): void {
+    this.host.voice?.cancel()
+    this.clearVoiceTimer()
+    const ticket = this.voiceTicket
+    this.setVoice({ phase: 'message', text })
+    this.voiceTimer = this.timers.set(() => {
+      this.voiceTimer = null
+      if (ticket === this.voiceTicket && this.voice.phase === 'message') this.closeVoice()
+    }, TIMING.invalidMs)
+  }
+
+  /**
+   * New voice state: a text update to the panel's words, plus its frame (two more text updates) when it
+   * opens or closes. No image and no rebuild, ever.
+   */
+  private setVoice(next: VoicePhase): void {
+    const wasOpen = this.modalOpen
+    const phaseChanged = next.phase !== this.voice.phase
+    this.voice = next
+    if (phaseChanged) this.syncSpinner()
+    this.drawModalText()
+    if (wasOpen !== this.modalOpen) this.drawModalFrame()
+  }
+
+  /** Run the spinner while listening or thinking, from its first frame; stop it otherwise. */
+  private syncSpinner(): void {
+    if (this.spinTimer !== null) {
+      this.timers.clear(this.spinTimer)
+      this.spinTimer = null
+    }
+    this.spinFrame = 0
+    if (this.voice.phase !== 'listening' && this.voice.phase !== 'thinking') return
+    const tick = () => {
+      this.spinTimer = null
+      if (this.voice.phase !== 'listening' && this.voice.phase !== 'thinking') return
+      this.spinFrame++
+      this.drawModalText()
+      this.spinTimer = this.timers.set(tick, TIMING.spinnerMs)
+    }
+    this.spinTimer = this.timers.set(tick, TIMING.spinnerMs)
+  }
+
+  private clearVoiceTimer(): void {
+    if (this.voiceTimer !== null) {
+      this.timers.clear(this.voiceTimer)
+      this.voiceTimer = null
+    }
+  }
+
+  /** Frame on or off (strip panel only: the card's frame never changes). */
+  private drawModalFrame(): void {
+    if (this.page !== 'play' || !this.hasVoice) return
+    const spot = panelSpot(this.settings)
+    if (spot.persistent) return
+    const open = this.modalOpen
+    const frame = panelFrame(open, spot.cells)
+    this.queue.text({ containerID: IDS.play.voiceFrame, containerName: NAMES.voiceFrame }, () => frame.a)
+    this.queue.text({ containerID: IDS.play.voiceFrameB, containerName: NAMES.voiceFrameB }, () => frame.b)
+  }
+
+  /** Panel words: the voice state, or between holds the card hint (or nothing, in the strip). */
+  private panelText(): string {
+    const idle = panelSpot(this.settings).persistent ? idleCardText(this.talkMode ? 'talk' : 'delete') : ' '
+    return modalText(this.voice, this.spinFrame, idle)
+  }
+
+  private drawModalText(): void {
+    if (this.page !== 'play' || !this.hasVoice) return
+    this.queue.text({ containerID: IDS.play.voice, containerName: NAMES.voice }, () => this.panelText())
   }
 
   private onListItem(label: string | null): void {
@@ -256,6 +529,7 @@ export class Wordlens {
     if (this.locked) return
     if (label === DEL) return this.backspace()
     if (label === ENTER) return this.submit()
+    if (label === 'CLEAR') return this.clearRow()
     if (/^[A-Z]$/.test(label)) this.type(label.toLowerCase())
   }
 
@@ -356,12 +630,19 @@ export class Wordlens {
   // ───────────────────────────── pages ─────────────────────────────
 
   private containersFor(page: PageName): PageContainers {
-    if (page === 'help') return helpPage(this.settings)
+    const voice = this.host.voice !== undefined
+    if (page === 'help') return helpPage(this.settings, voice)
     if (page === 'stats') return statsPage(this.stats)
-    if (!this.keyboard) return playPage(this.listPage, this.settings)
+    const menu = playMenu(this.settings, voice)
+    const panel = this.hasVoice ? { content: this.panelText(), open: this.modalOpen } : undefined
+    if (this.controlsMode) {
+      this.lettersShown = this.currentLetters()
+      return playPage(this.listPage, this.settings, undefined, menu, panel, { focus: this.ctrlFocus, letters: this.lettersShown })
+    }
+    if (!this.keyboard) return playPage(this.listPage, this.settings, undefined, menu, panel)
     // The page is created with the current keyboard text, so it needs no update after the build.
     this.kbShown = this.currentKbText()
-    return playPage(this.listPage, this.settings, this.kbShown)
+    return playPage(this.listPage, this.settings, this.kbShown, menu, panel)
   }
 
   goto(page: PageName): void {
@@ -419,7 +700,8 @@ export class Wordlens {
     if (this.page !== 'play') return
     if (this.keyboard) {
       // The info image takes the keys slot; the marks are on the keyboard below.
-      this.queue.image({ containerID: IDS.play.keys, containerName: NAMES.keys }, () => encodePng(renderInfo(this.stats)))
+      this.queue.image({ containerID: IDS.play.keys, containerName: NAMES.keys }, () => encodePng(renderInfo(this.stats, this.hasVoice ? 'card' : 'guide')))
+      if (this.controlsMode) return this.drawLetters() // ENTER / DEL / CLEAR are text, built with the page
       const band = () => renderKbBand(keyMarks(this.round.guesses, this.round.target))
       this.queue.image({ containerID: IDS.play.kbLeft, containerName: NAMES.kbLeft }, () => encodePng(kbHalf(band(), 'left')))
       this.queue.image({ containerID: IDS.play.kbRight, containerName: NAMES.kbRight }, () => encodePng(kbHalf(band(), 'right')))
@@ -437,7 +719,7 @@ export class Wordlens {
 
   /** Sends the keyboard text if it changed (focus moved, or a guess blanked letters the image now draws). */
   private drawKbText(): void {
-    if (this.page !== 'play' || !this.keyboard) return
+    if (this.page !== 'play' || !this.keyboard || this.controlsMode) return
     if (!this.kbPending && this.currentKbText() === this.kbShown) return
     this.kbPending = true
     this.queue.text({ containerID: IDS.play.kbText, containerName: NAMES.kbText }, () => {

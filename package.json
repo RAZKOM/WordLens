@@ -9,13 +9,15 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "wordlists": "tsx scripts/build-wordlists.ts",
+    "voice-model": "tsx scripts/voice-model.ts",
     "preview-frames": "tsx scripts/preview-frames.ts",
     "pack": "npm run build && evenhub pack app.json dist -o wordlens.ehpk",
     "qr": "evenhub qr --port 5173",
     "simulate": "evenhub-simulator http://localhost:5173"
   },
   "dependencies": {
-    "@evenrealities/even_hub_sdk": "^0.0.16"
+    "@evenrealities/even_hub_sdk": "^0.0.16",
+    "vosk-browser": "^0.0.8"
   },
   "devDependencies": {
     "@evenrealities/evenhub-cli": "^0.1.14",

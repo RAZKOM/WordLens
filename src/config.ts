@@ -17,18 +17,32 @@ export interface Settings {
    * 'horizontal': a drawn carousel; swipes move left/right through all 28 items, no pages.
    */
   picker: 'keyboard' | 'vertical' | 'horizontal'
+  /**
+   * What holding does on Play. 'delete': backspace. 'talk': push-to-talk; speak a word or spell letters,
+   * let go, then swipe through what was heard and tap to confirm. Also switched from the menu (the choice
+   * is saved). Voice needs the keyboard or horizontal picker: the native list cannot step through choices.
+   */
+  hold: 'delete' | 'talk'
+  /**
+   * Keyboard picker with push-to-talk: 'full' shows the QWERTY keyboard; 'controls' shows only ENTER, DEL
+   * and CLEAR as text (swipe between them, tap to press), since the letters come from voice. Switched from the menu
+   * (saved). Ignored when hold deletes: without voice the letters are needed.
+   */
+  keys: 'full' | 'controls'
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   boardSide: 'right',
   letterOrder: 'alphabetical',
   picker: 'keyboard',
+  hold: 'talk',
+  keys: 'full',
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 
 export const IDS = {
-  play: { board: 1, keys: 2, list: 3, strip: 4, capture: 5, kbLeft: 6, kbRight: 7, kbText: 8 },
+  play: { board: 1, keys: 2, list: 3, strip: 4, capture: 5, kbLeft: 6, kbRight: 7, kbText: 8, voice: 9, voiceFrame: 10, voiceFrameB: 11, ctrl: 12, ctrlB: 13, ctrlText: 14, ctrlLetters: 15 },
   help: { image: 1, text: 2 },
   stats: { text: 1, chart: 2 },
 } as const
@@ -42,6 +56,13 @@ export const NAMES = {
   kbLeft: 'kb-left',
   kbRight: 'kb-right',
   kbText: 'kb-text',
+  voice: 'voice',
+  voiceFrame: 'voice-frame',
+  voiceFrameB: 'voice-frame-b',
+  ctrl: 'ctrl',
+  ctrlB: 'ctrl-b',
+  ctrlText: 'ctrl-text',
+  ctrlLetters: 'ctrl-letters',
   helpImage: 'help-img',
   helpText: 'help-text',
   statsText: 'stats-text',
@@ -91,6 +112,10 @@ export const MENU = {
   quit: 5,
   back: 6,
   backspace: 7,
+  /** Switches Settings.hold between delete and talk. */
+  hold: 8,
+  /** Switches Settings.keys between the full keyboard and the ENTER / DEL controls. */
+  keys: 9,
 } as const
 
 /**
@@ -107,4 +132,30 @@ export const TIMING = {
   lossMs: 7500,
   imageGapMs: 100,
   imageRetryMs: 300,
+  /** Push-to-talk stops by itself after this long, in case the release event never arrives. */
+  talkMaxMs: 8000,
+  /** Voice panel spinner: one text update per frame (~60 ms each), so a few a second is cheap. */
+  spinnerMs: 300,
+} as const
+
+/** Voice input (push-to-talk). See src/voice/. */
+export const VOICE = {
+  /** Model archive, relative to the page; `npm run voice-model` puts it in public/. */
+  modelPath: 'vosk/model.tar.gz',
+  /** Mic frames are taken as signed 16-bit little-endian mono at this rate (see the clip log). */
+  sampleRate: 16000,
+  /** Shorter clips are taken as an accidental hold. */
+  minSeconds: 0.2,
+  /** Longer clips are cut (also bounds memory if the release is lost). */
+  maxSeconds: 8,
+  /** A clip whose loudest sample is below this is silence. */
+  silencePeak: 0.002,
+  /** Silence added after the clip so the decoder closes the last word. */
+  padSeconds: 0.5,
+  /** Decodes for whole words: the best answer plus runner-ups (homophones, near misses). */
+  wordPasses: 4,
+  /** Decodes for a single spelled letter (B/D/E/P/T sound alike). */
+  spellPasses: 4,
+  loadTimeoutMs: 120_000,
+  decodeTimeoutMs: 15_000,
 } as const

@@ -7,9 +7,14 @@ import { IMAGE_H, IMAGE_W } from './layout'
  * Keyboard mode's second top image: streak and best, what the marks mean, the gestures. The keyboard below
  * shows the letter marks, so the QWERTY display is not needed here.
  */
-export function renderInfo(stats: Stats): Framebuffer {
+/**
+ * @param mode 'guide': the marks and gestures, as before. 'card': STREAK / BEST only; the voice card (text
+ *   boxes) fills the rest, and the guide lives on the Help page.
+ */
+export function renderInfo(stats: Stats, mode: 'guide' | 'card' = 'guide'): Framebuffer {
   const fb = new Framebuffer(IMAGE_W, IMAGE_H)
   fb.textCentered(`STREAK ${stats.streak}   BEST ${stats.best}`, IMAGE_W / 2, 3, 2, 15)
+  if (mode === 'card') return fb
   const legend: Array<['correct' | 'present' | 'absent', string, string]> = [
     ['correct', 'A', 'RIGHT SPOT'],
     ['present', 'B', 'WRONG SPOT'],

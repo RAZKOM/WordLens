@@ -8,8 +8,9 @@
  *    envelopes, or scroll/lifecycle events would fire the tap handler.
  *  - Match explicit types first; CLICK last.
  *  - `currentSelectItemIndex` 0 can also arrive missing.
- *  - Long press deletes one letter. The release is ignored so a hold does not
- *    delete twice. On the glasses that same hold also opens the OS menu.
+ *  - Long press deletes one letter (or, in push-to-talk mode, starts listening).
+ *    The release is its own input: it ends push-to-talk and is otherwise
+ *    ignored, so a hold never deletes twice.
  */
 
 /** Mirrors OsEventTypeList (checked against the SDK enum in main.ts). */
@@ -33,6 +34,7 @@ export type Input =
   | { kind: 'listSelect'; index: number; name: string | null }
   | { kind: 'tap' }
   | { kind: 'longPress' }
+  | { kind: 'longPressRelease' }
   | { kind: 'scrollTop' }
   | { kind: 'scrollBottom' }
   | { kind: 'foregroundEnter' }
@@ -70,7 +72,7 @@ export function parseEvent(e: RawEvent): Input {
   const any = (t: number) => list === t || text === t || sys === t
 
   if (any(EV.LONG_PRESS)) return { kind: 'longPress' }
-  if (any(EV.LONG_PRESS_RELEASE)) return { kind: 'ignore' }
+  if (any(EV.LONG_PRESS_RELEASE)) return { kind: 'longPressRelease' }
   if (any(EV.DOUBLE_CLICK)) return { kind: 'doubleTap' }
   if (sys === EV.SYSTEM_EXIT || sys === EV.ABNORMAL_EXIT) return { kind: 'exit' }
   if (sys === EV.FOREGROUND_ENTER) return { kind: 'foregroundEnter' }

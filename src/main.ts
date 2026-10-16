@@ -1,4 +1,5 @@
 import {
+  AudioInputSource,
   CreateStartUpPageContainer,
   ImageRawDataUpdate,
   ImageRawDataUpdateResult,
@@ -10,8 +11,11 @@ import {
 } from '@evenrealities/even_hub_sdk'
 import { Wordlens, type Host } from './controller'
 import { EV, type RawEvent } from './input'
-import { DEFAULT_SETTINGS, NAMES, type Settings } from './config'
+import { DEFAULT_SETTINGS, NAMES, VOICE, type Settings } from './config'
 import { demoFromUrl } from './demo'
+import type { EngineStatus } from './voice/engine'
+import { fakeMic } from './voice/fakemic'
+import { VoiceSession, type Mic, type Recognizer } from './voice/session'
 
 // input.ts mirrors the SDK enum to stay SDK-free for tests; fail loudly if they drift.
 const ENUM_PAIRS: Array<[number, number]> = [
@@ -30,21 +34,27 @@ for (const [ours, sdk] of ENUM_PAIRS) if (ours !== sdk) throw new Error(`event e
 
 /**
  * Settings: DEFAULT_SETTINGS in config.ts, optionally overridden by URL
- * parameters for quick testing, e.g. ?picker=horizontal&order=alphabetical&board=left (picker: keyboard,
- * vertical or horizontal)
+ * parameters for quick testing, e.g. ?picker=horizontal&order=alphabetical&board=left&hold=talk (picker:
+ * keyboard, vertical or horizontal; hold: delete or talk; keys: full or controls; hold and keys also win
+ * over the saved menu choices)
  */
-function settingsFromUrl(): Settings {
+function overridesFromUrl(): Partial<Settings> {
   const q = new URLSearchParams(location.search)
-  const s: Settings = { ...DEFAULT_SETTINGS }
+  const s: Partial<Settings> = {}
   const picker = q.get('picker')
   const order = q.get('order')
   const board = q.get('board')
+  const hold = q.get('hold')
+  const keys = q.get('keys')
   if (picker === 'keyboard' || picker === 'vertical' || picker === 'horizontal') s.picker = picker
   if (order === 'frequency' || order === 'alphabetical') s.letterOrder = order
   if (board === 'left' || board === 'right') s.boardSide = board
+  if (hold === 'delete' || hold === 'talk') s.hold = hold
+  if (keys === 'full' || keys === 'controls') s.keys = keys
   return s
 }
-const settings = settingsFromUrl()
+const overrides = overridesFromUrl()
+const settings: Settings = { ...DEFAULT_SETTINGS, ...overrides }
 
 // ── Phone companion view: mirrors the frames sent to the glasses. ──
 const statusEl = document.getElementById('status')
@@ -68,8 +78,22 @@ function mirrorPage(c: { textObject?: Array<Record<string, unknown>> }): void {
   const kb = c.textObject?.find((t) => t.containerName === NAMES.kbText)
   if (typeof kb?.content === 'string') mirrorText(kb.content)
 }
+let mainStatus = ''
+let voiceStatus = ''
 function setStatus(text: string): void {
-  if (statusEl) statusEl.textContent = text
+  mainStatus = text
+  if (statusEl) statusEl.textContent = voiceStatus ? `${mainStatus} ${voiceStatus}` : mainStatus
+}
+const VOICE_STATUS: Record<EngineStatus, string> = {
+  idle: '',
+  loading: 'Voice: loading the model…',
+  ready: 'Voice: ready.',
+  failed: 'Voice: the model failed to load (npm run voice-model).',
+}
+function setVoiceStatus(s: EngineStatus, detail?: string): void {
+  voiceStatus = VOICE_STATUS[s]
+  if (detail) console.info(`[wordlens] voice model ${s}: ${detail}`)
+  setStatus(mainStatus)
 }
 function mirrorFrame(name: string, bytes: Uint8Array): void {
   const img = mirror[name]
@@ -82,6 +106,36 @@ function mirrorFrame(name: string, bytes: Uint8Array): void {
 
 setStatus('Connecting to your glasses…')
 const bridge = await waitForEvenAppBridge()
+
+// Push-to-talk: the glasses mic is open only while a hold lasts; recognition runs offline on the phone.
+// The engine (~6 MB of WebAssembly) is a separate chunk, loaded only once push-to-talk is switched on.
+type Engine = import('./voice/engine').VoskEngine
+let enginePromise: Promise<Engine> | null = null
+function loadEngine(): Promise<Engine> {
+  enginePromise ??= import('./voice/engine').then(
+    (m) => new m.VoskEngine(new URL(VOICE.modelPath, location.href).href, setVoiceStatus),
+    (err: unknown) => {
+      enginePromise = null
+      setVoiceStatus('failed', String(err))
+      throw err
+    },
+  )
+  return enginePromise
+}
+const engine: Recognizer = {
+  prepare: () => void loadEngine().then((e) => e.prepare(), () => {}),
+  recognise: async (samples, typedLen) => (await loadEngine()).recognise(samples, typedLen),
+}
+const glassesMic: Mic = {
+  open: () => bridge.audioControl(true, AudioInputSource.Glasses),
+  close: () => bridge.audioControl(false),
+}
+// Dev only: ?fakemic=<wav url> plays a recording instead of the mic (see fakemic.ts).
+const fakeMicUrl = new URLSearchParams(location.search).get('fakemic')
+const voice: VoiceSession = new VoiceSession(
+  fakeMicUrl ? fakeMic(fakeMicUrl, (frame) => voice.push(frame)) : glassesMic,
+  engine,
+)
 
 const host: Host = {
   async createPage(c) {
@@ -118,14 +172,19 @@ const host: Host = {
     get: (key) => bridge.getLocalStorage(key),
     set: (key, value) => bridge.setLocalStorage(key, value),
   },
+  voice,
 }
 
 // Dev only (store screenshots): ?demo=… plays a fixed round from memory; see demo.ts.
 const demo = await demoFromUrl(location.search)
 if (demo) host.kv = demo.kv
-const app = new Wordlens(host, { settings })
+const app = new Wordlens(host, { settings: overrides })
 if (demo) app.kbFocus = demo.focus
 const unsubscribe = bridge.onEvenHubEvent((event) => {
+  if (event.audioEvent) {
+    voice.push(event.audioEvent.audioPcm)
+    return
+  }
   app.handle(event as RawEvent)
   const sys = event.sysEvent
   if (sys && (sys.eventType === OsEventTypeList.SYSTEM_EXIT_EVENT || sys.eventType === OsEventTypeList.ABNORMAL_EXIT_EVENT)) {

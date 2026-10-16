@@ -2,3 +2,4 @@ node_modules
 dist
 previews
 *.ehpk
+public/vosk/
