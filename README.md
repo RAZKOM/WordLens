@@ -22,7 +22,7 @@ npx tsx scripts/listing-shots.ts  # store Help and Stats screenshots
 
 Requires Even App ≥ 2.2.10 and SDK ≥ 0.0.15 (pinned in `package.json` / `app.json`).
 Older SDKs drop long-press event types and misread a long press as two taps.
-`app.json` asks for the `g2-microphone` permission, used only while a hold to talk lasts.
+`app.json` asks for the `g2-microphone` permission, used only while a hold to talk lasts; see [PRIVACY.md](PRIVACY.md).
 
 ## Settings
 
