@@ -1,18 +1,16 @@
 /**
- * Store-listing Help and Stats frames, rendered with the same code the glasses use (firmware text drawn in
- * the pixel font so the shot is readable). The play shots come from the simulator, because the keyboard's
- * letters are firmware text: scripts/listing-sim.ts.
+ * Store-listing Stats frame, rendered with the same code the glasses use (firmware text drawn in the pixel
+ * font so the shot is readable). The play and Help shots come from the simulator, because their text
+ * (keyboard letters, the voice card, the Help text with ● ○ ・) is firmware text: scripts/listing-sim.ts.
  *   npx tsx scripts/listing-shots.ts
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { DEFAULT_SETTINGS } from '../src/config'
 import { DEMO_HISTORY } from '../src/demo'
 import { renderDistribution } from '../src/render/chart'
 import { Framebuffer } from '../src/render/framebuffer'
-import { renderHelp } from '../src/render/help'
 import { IMAGE_H, IMAGE_W } from '../src/render/layout'
 import { encodeDisplayPng } from '../src/render/png'
-import { helpText, statsText } from '../src/pages'
+import { statsText } from '../src/pages'
 
 const OUT = 'docs/screenshots'
 const SCALE = 1
@@ -57,12 +55,6 @@ function drawLines(fb: Framebuffer, text: string, x: number, y: number, maxW: nu
 }
 
 const shots: Array<[string, Framebuffer]> = []
-
-const help = new Framebuffer(576, 288)
-blit(help, renderHelp(), (576 - IMAGE_W) / 2, 0)
-// The pixel font has no comma; the firmware text on the glasses does.
-drawLines(help, helpText(DEFAULT_SETTINGS).toUpperCase().replaceAll(',', ''), 16, IMAGE_H + 20, 544)
-shots.push(['04-help', help])
 
 const stats = new Framebuffer(576, 288)
 drawLines(stats, statsText(DEMO_HISTORY), 16, 20, IMAGE_W - 28)
